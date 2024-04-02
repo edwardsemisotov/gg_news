@@ -1,0 +1,51 @@
+CREATE TABLE IF NOT EXISTS links (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER,
+    url VARCHAR NOT NULL,
+    status VARCHAR,
+    added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES sources(id)
+);
+ALTER TABLE links ADD UNIQUE (url);
+
+
+CREATE TABLE IF NOT EXISTS translations (
+    id SERIAL PRIMARY KEY,
+    link_id INTEGER,
+    language VARCHAR(2), -- 'ua', 'by', 'ru'
+    status VARCHAR,
+    content TEXT,
+    FOREIGN KEY (link_id) REFERENCES links(id),
+    UNIQUE (link_id, language)
+);
+
+CREATE TABLE IF NOT EXISTS image_links (
+    id SERIAL PRIMARY KEY,
+    link_id INTEGER NOT NULL,
+    image_url VARCHAR NOT NULL,
+    FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS video_links (
+    id SERIAL PRIMARY KEY,
+    link_id INTEGER NOT NULL,
+    video_url VARCHAR NOT NULL,
+    FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS article_details (
+    id SERIAL PRIMARY KEY,
+    link_id INTEGER NOT NULL,
+    summary TEXT,
+    content TEXT,
+    FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE
+);
+
+ALTER TABLE article_details ADD UNIQUE (link_id);
+
+
+
+
+
+
+

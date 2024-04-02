@@ -1,0 +1,26 @@
+CREATE TABLE IF NOT EXISTS patterns (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER,
+    pattern VARCHAR NOT NULL UNIQUE,
+    FOREIGN KEY (source_id) REFERENCES sources(id
+
+
+INSERT INTO patterns (source_id, pattern) VALUES
+((SELECT id FROM sources WHERE name = 'vaticannews'), '/ru/vatican-city/news/'),
+((SELECT id FROM sources WHERE name = 'vaticannews'), '/ru/world/news/')
+ON CONFLICT (pattern) DO NOTHING;
+
+
+INSERT INTO patterns (source_id, pattern) VALUES
+((SELECT id FROM sources WHERE name = 'vaticannews'), '/ru/vatican-city/news/'),
+((SELECT id FROM sources WHERE name = 'vaticannews'), '/ru/world/news/')
+ON CONFLICT (pattern) DO NOTHING;
+
+INSERT INTO patterns (source_id, pattern) VALUES
+((SELECT id FROM sources WHERE name = 'msj'), '/novosti/'),
+((SELECT id FROM sources WHERE name = 'msj'), '/stati-dlya-muzhchin/'),
+((SELECT id FROM sources WHERE name = 'msj'), '/raspisanie/'),
+((SELECT id FROM sources WHERE name = 'msj'), '/meropriyatiya/'),
+((SELECT id FROM sources WHERE name = 'msj'), '/katolicheskie-xramy/'),
+((SELECT id FROM sources WHERE name = 'msj'), '/evangelie/')
+ON CONFLICT (pattern) DO NOTHING;

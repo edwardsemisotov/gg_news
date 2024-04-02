@@ -1,19 +1,33 @@
-from datetime import datetime
-
-
-current_date_pattern = datetime.now().strftime("%Y/%m/%d")
 
 link_dikt = {
-    'polskie_radio': {
-        'url': 'https://www.polskieradio.pl/protesty-w-warszawie/tag170813',
-        'patterns': ['Artykul', 'artykul']
+    'vaticannews': {
+        'url': 'https://www.vaticannews.va/ru.html',
+        'patterns': ['/ru/vatican-city/news/',
+                     '/ru/world/news/'
+                     ]
     },
-    'um.warszawa.pl': {
-        'url': 'https://um.warszawa.pl/aktualnosci-warszawa',
-        'patterns': ['/-/']
+    'msj': {
+        'url': 'https://msj.by/',
+        'patterns': [
+            '/novosti/',
+            '/stati-dlya-muzhchin/',
+            '/raspisanie/',
+            '/meropriyatiya/',
+            '/katolicheskie-xramy/',
+            '/evangelie/'
+        ]
     },
-    'warszawa-diaspora': {
-        'url': 'https://warszawa-diaspora.pl/',
-        'patterns': [current_date_pattern]
+    'catholic.by': {
+        'url': 'https://catholic.by/',
+        'patterns': [
+            '/3/lib/',
+            '/3/liturgy/',
+            '/3/kasciol/',
+            '/3/pub/',
+            '/3/news/'
+        ]
     }
 }
+
+
+

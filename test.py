@@ -1,30 +1,59 @@
 import requests
-from bs4 import BeautifulSoup
-import re
+from newspaper import Article
+from requests.exceptions import SSLError
+import psycopg2
 
-# URL статьи
-url = 'https://polskieradio24.pl/artykul/3356033'
+conn = psycopg2.connect(
+    dbname="coredb",
+    user="postgres",
+    password="mysecretpassword",
+    host="localhost",
+    port="5432"
+)
 
-# Отправка HTTP-запроса
-response = requests.get(url)
+cur = conn.cursor()
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
-# Проверка успешности запроса
-if response.status_code == 200:
-    # Парсинг HTML
-    soup = BeautifulSoup(response.content, 'html.parser')
+try:
+    cur.execute("SELECT id, url FROM links WHERE status != 'ready' AND status != 'error'")
+    urls = cur.fetchall()
 
-    # Поиск всех интересующих тегов
-    content_elements = soup.find_all(['p', 'h2', 'a'])
+    for link_id, url in urls:
+        try:
+            cur.execute("UPDATE links SET status = 'in progress' WHERE id = %s", (link_id,))
+            conn.commit()
 
-    # Обработка найденных элементов
-    for element in content_elements:
-        # Если элемент - ссылка и содержит YouTube URL
-        if element.name == 'a' and 'href' in element.attrs:
-            href = element['href']
-            if 'youtube.com' in href or 'youtu.be' in href:
-                print(f'YouTube ссылка: {href}')
-        else:
-            # Для всех других случаев, выводим текст элемента
-            print(element.get_text())
-else:
-    print(f'Ошибка при запросе к {url}: Статус {response.status_code}')
+            article = Article(url)
+            article.download()
+            article.parse()
+            article.nlp()
+
+            cur.execute("""
+                INSERT INTO article_details (link_id, summary, content) VALUES (%s, %s, %s)
+                ON CONFLICT (link_id) DO UPDATE SET summary = EXCLUDED.summary, content = EXCLUDED.content
+            """, (link_id, article.summary, article.text))
+
+
+            for image in article.images:
+                cur.execute("INSERT INTO image_links (link_id, image_url) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                            (link_id, image))
+            for video in article.movies:
+                cur.execute("INSERT INTO video_links (link_id, video_url) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                            (link_id, video))
+
+            # Обновляем статус на 'ready'
+            cur.execute("UPDATE links SET status = 'ready' WHERE id = %s", (link_id,))
+            conn.commit()
+        except (requests.exceptions.RequestException, SSLError) as e:
+            print(f"Произошла ошибка при загрузке {url}: {e}")
+            conn.rollback()
+            cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
+            conn.commit()
+        except Exception as e:
+            print(f"Произошла ошибка при обработке статьи {url}: {e}")
+            conn.rollback()
+            cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
+            conn.commit()
+finally:
+    cur.close()
+    conn.close()

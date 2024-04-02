@@ -1,0 +1,13 @@
+INSERT INTO sources (name, url) VALUES
+('vaticannews', 'https://www.vaticannews.va/ru.html'),
+('msj', 'https://msj.by/'),
+('catholic.by', 'https://catholic.by/')
+ON CONFLICT (url) DO NOTHING;
+
+
+
+CREATE TABLE IF NOT EXISTS sources (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    url VARCHAR NOT NULL UNIQUE
+);
