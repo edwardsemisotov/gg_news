@@ -46,44 +46,47 @@ async def send_articles(bot, channel_id):
 
         for link in links:
             link_id, url = link['id'], link['url']
-            if 'youtube' in url:
-                message = f"Пройдите по ссылке для подробностей: {url}"
+            cur.execute("""
+                SELECT ad.summary, il.image_url
+                FROM article_details ad
+                LEFT JOIN image_links il ON ad.link_id = il.link_id
+                WHERE ad.link_id = %s
+                ORDER BY il.id DESC
+                LIMIT 1;
+            """, (link_id,))
 
-                success = await send_with_retry(bot, channel_id, message)
+            article = cur.fetchone()
 
-                if success:
-                    cur.execute("UPDATE links SET status = 'done' WHERE id = %s", (link_id,))
-                else:
-                    cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
-                conn.commit()
-
-            else:
-                cur.execute("""
-                    SELECT ad.summary, il.image_url
-                    FROM article_details ad
-                    LEFT JOIN image_links il ON ad.link_id = il.link_id
-                    WHERE ad.link_id = %s
-                    ORDER BY il.id DESC
-                    LIMIT 1;
-                """, (link_id,))
-
-                article = cur.fetchone()
-
-                if article:
-
-                    summary, image_url = article['summary'], article['image_url']
+            if article:
+                if 'youtube' in url:
+                    summary = article['summary']
                     if len(summary) > 1024:
                         summary = summary[:950] + "..."
 
                     message = f"{summary}\nПройдите по ссылке для подробностей: {url}"
 
-                    success = await send_with_retry(bot, channel_id, message, image_url)
+                    success = await send_with_retry(bot, channel_id, message)
 
                     if success:
                         cur.execute("UPDATE links SET status = 'done' WHERE id = %s", (link_id,))
                     else:
                         cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
                     conn.commit()
+
+            else:
+                summary, image_url = article['summary'], article['image_url']
+                if len(summary) > 1024:
+                    summary = summary[:950] + "..."
+
+                message = f"{summary}\nПройдите по ссылке для подробностей: {url}"
+
+                success = await send_with_retry(bot, channel_id, message, image_url)
+
+                if success:
+                    cur.execute("UPDATE links SET status = 'done' WHERE id = %s", (link_id,))
+                else:
+                    cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
+                conn.commit()
 
             await asyncio.sleep(10)
 

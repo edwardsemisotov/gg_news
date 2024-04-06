@@ -38,7 +38,7 @@ try:
 
             cur.execute("""
                 INSERT INTO article_details (link_id, summary, content) VALUES (%s, %s, %s)
-                ON CONFLICT (link_id) DO UPDATE SET summary = EXCLUDED.summary, content = EXCLUDED.content
+                ON CONFLICT (link_id) DO NOTHING
             """, (link_id, article.summary, article.text))
 
             # Фильтрация и добавление изображений

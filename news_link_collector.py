@@ -5,6 +5,8 @@ import psycopg2
 import googleapiclient.discovery
 from googleapiclient.errors import HttpError
 import config
+import time
+
 
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
@@ -55,27 +57,37 @@ for row in rows:
     print(f"Processing: {url} with pattern: {pattern}")
 
     if "youtube.com" in url:
-        try:
-            videos = get_channel_videos(pattern)
-            for video in videos:
-                print(f"Title: {video['title']}\nDescription: {video['description']}\nURL: {video['video_url']}\n")
-                cur.execute(
-                    "INSERT INTO links (source_id, url, status) VALUES ((SELECT id FROM sources WHERE url = %s), %s, 'pending') ON CONFLICT (url) DO NOTHING RETURNING id;",
-                    (url, video['video_url'])
-                )
-                result = cur.fetchone()
-                if result:
-                    link_id = result[0]
-                    cur.execute("""
-                        INSERT INTO article_details (link_id, summary, content) VALUES (%s, %s, %s)
-                        ON CONFLICT (link_id) DO UPDATE SET summary = EXCLUDED.summary, content = EXCLUDED.content
-                    """, (link_id, video['title'], video['description']))
-                else:
-                    print(f"Link already exists: {video['video_url']}")
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                videos = get_channel_videos(pattern)
+                for video in videos:
+                    print(f"Title: {video['title']}\nDescription: {video['description']}\nURL: {video['video_url']}\n")
+                    cur.execute(
+                        "INSERT INTO links (source_id, url, status) VALUES ((SELECT id FROM sources WHERE url = %s), %s, 'pending') ON CONFLICT (url) DO NOTHING RETURNING id;",
+                        (url, video['video_url'])
+                    )
+                    result = cur.fetchone()
+                    if result:
+                        link_id = result[0]
+                        cur.execute("""
+                            INSERT INTO article_details (link_id, summary, content) VALUES (%s, %s, %s)
+                            ON CONFLICT (link_id) DO UPDATE SET summary = EXCLUDED.summary, content = EXCLUDED.content
+                        """, (link_id, video['title'], video['description']))
+                    else:
+                        print(f"Link already exists: {video['video_url']}")
 
-            conn.commit()
-        except HttpError as e:
-            print(f"An HTTP error {e.resp.status} occurred:\n{e.content}")
+                conn.commit()
+                break
+            except HttpError as e:
+                if e.resp.status in [408, 504]:
+                    print(
+                        f"Attempt {attempt + 1} of {max_attempts}: HTTP timeout error occurred. Retrying in 5 seconds...")
+                    time.sleep(5)
+                    continue
+                else:
+                    print(f"An HTTP error {e.resp.status} occurred:\n{e.content}")
+                    break
     else:
         try:
             response = session.get(url, verify=False)

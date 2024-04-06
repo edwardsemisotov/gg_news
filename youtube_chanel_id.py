@@ -1,6 +1,7 @@
 import googleapiclient.discovery
 from googleapiclient.errors import HttpError
-import config  # Убедитесь, что ваш API ключ находится здесь
+import config
+
 
 def search_channel_by_name(channel_name):
     # Создаем клиент API YouTube
@@ -32,7 +33,7 @@ def search_channel_by_name(channel_name):
         print(f"Произошла ошибка: {e}")
         return None
 
-channel_name = 'studnia_jakuba'
+channel_name = 'tautv978'
 channel_info = search_channel_by_name(channel_name)
 if channel_info:
     print(f"Найден канал: {channel_info['title']}")
