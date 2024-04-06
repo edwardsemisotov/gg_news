@@ -1,14 +1,12 @@
 import subprocess
 import time
 
-# Список скриптов для выполнения
 scripts = [
     "news_link_collector.py",
     "info_extractor.py",
     "tg.py"
 ]
 
-# Основной цикл
 while True:
     for script in scripts:
         # Запускаем скрипт
