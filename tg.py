@@ -37,9 +37,11 @@ async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=
     return False
 
 async def send_articles(bot, channel_id):
+    conn = None
     try:
-        with psycopg2.connect(**db_params, cursor_factory=psycopg2.extras.DictCursor) as conn:
-            with conn.cursor() as cur:
+        conn = psycopg2.connect(**db_params)
+        with conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                 cur.execute("SELECT id, url FROM links WHERE status = 'ready';")
                 links = cur.fetchall()
 
@@ -58,8 +60,8 @@ async def send_articles(bot, channel_id):
                     article = cur.fetchone()
 
                     if article:
-                        summary = article['summary'] if 'summary' in article else None
-                        image_url = article['image_url'] if 'image_url' in article else None
+                        summary = article['summary']
+                        image_url = article['image_url']
                         message = f"{summary}\n\nMore details: {url}"
 
                         success = await send_with_retry(bot, channel_id, message, image_url)
@@ -69,10 +71,16 @@ async def send_articles(bot, channel_id):
                     else:
                         cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
 
+                    conn.commit()
                     await asyncio.sleep(10)
 
     except Exception as e:
         logger.error(f"An error occurred: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
 
 if __name__ == "__main__":
     bot_token = config.tg_bot_token
