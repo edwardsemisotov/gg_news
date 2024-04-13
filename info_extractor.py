@@ -6,7 +6,6 @@ import psycopg2.extras
 import config
 import logging
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
@@ -39,10 +38,10 @@ def process_article(cur, link_id, url):
         cur.execute("UPDATE links SET status = 'ready' WHERE id = %s", (link_id,))
     except (requests.exceptions.RequestException, SSLError) as e:
         logger.error(f"Error downloading {url}: {e}")
-        cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
+        cur.execute("UPDATE links SET status = 'error_downloading' WHERE id = %s", (link_id,))
     except Exception as e:
         logger.error(f"Error processing article {url}: {e}")
-        cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
+        cur.execute("UPDATE links SET status = 'error_article' WHERE id = %s", (link_id,))
 
 
 def main():
@@ -56,7 +55,7 @@ def main():
         )
         cur = conn.cursor()
 
-        cur.execute("SELECT id, url FROM links WHERE status NOT IN ('ready', 'error', 'send_error', 'done')")
+        cur.execute("SELECT id, url FROM links WHERE status='pending'")
         urls = cur.fetchall()
 
         for link_id, url in urls:
@@ -80,3 +79,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
