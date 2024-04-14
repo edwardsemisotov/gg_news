@@ -84,7 +84,7 @@ def main():
         )
         cur = conn.cursor()
 
-        cur.execute("SELECT id, url FROM links WHERE status='pending'")
+        cur.execute("SELECT id, url FROM links WHERE status='error_article' or status='pending'")
         urls = cur.fetchall()
 
         for link_id, url in urls:
