@@ -36,13 +36,14 @@ async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=
                 return False
     return False
 
+
 async def send_articles(bot, channel_id):
     conn = None
     try:
         conn = psycopg2.connect(**db_params)
         with conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute("SELECT id, url FROM links WHERE status = 'ready';")
+                cur.execute("SELECT id, url FROM links WHERE status = 'send_error';")
                 links = cur.fetchall()
 
                 for link in links:
@@ -62,14 +63,22 @@ async def send_articles(bot, channel_id):
                     if article:
                         summary = article['summary']
                         image_url = article['image_url']
+
+                        # Предварительный формат сообщения для определения его длины
                         message = f"{summary}\n\nMore details: {url}"
+                        # Проверка общей длины сообщения и дополнительное сокращение summary при необходимости
+                        if len(message) > 1024:
+                            max_summary_length = 1024 - len(
+                                f"\n\nMore details: {url}") - 3  # вычитаем длину URL и дополнительные символы
+                            summary = summary[:max_summary_length] + '...'
+                            message = f"{summary}\n\nMore details: {url}"
 
                         success = await send_with_retry(bot, channel_id, message, image_url)
 
                     if success:
                         cur.execute("UPDATE links SET status = 'done' WHERE id = %s", (link_id,))
                     else:
-                        cur.execute("UPDATE links SET status = 'error' WHERE id = %s", (link_id,))
+                        cur.execute("UPDATE links SET status = 'send_error' WHERE id = %s", (link_id,))
 
                     conn.commit()
                     await asyncio.sleep(10)
@@ -81,6 +90,7 @@ async def send_articles(bot, channel_id):
     finally:
         if conn:
             conn.close()
+
 
 if __name__ == "__main__":
     bot_token = config.tg_bot_token
