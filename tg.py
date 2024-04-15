@@ -27,7 +27,11 @@ async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=
                 await bot.send_message(chat_id=channel_id, text=message)
             return True
         except telegram_error.TelegramError as e:
-            if "Timed out" in str(e):
+            if "Wrong file identifier/http url specified" in str(e):
+                logger.warning(f"Invalid image URL, sending message without image: {image_url}")
+                image_url = None
+                retry_count += 1
+            elif "Timed out" in str(e):
                 logger.warning(f"Timeout error, retrying {retry_count + 1}/{max_retries}")
                 retry_count += 1
                 await asyncio.sleep(10)
@@ -35,7 +39,6 @@ async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=
                 logger.error(f"Error sending message to Telegram: {e}")
                 return False
     return False
-
 
 async def send_articles(bot, channel_id):
     conn = None
@@ -64,12 +67,9 @@ async def send_articles(bot, channel_id):
                         summary = article['summary']
                         image_url = article['image_url']
 
-                        # Предварительный формат сообщения для определения его длины
                         message = f"{summary}\n\nMore details: {url}"
-                        # Проверка общей длины сообщения и дополнительное сокращение summary при необходимости
                         if len(message) > 1024:
-                            max_summary_length = 1024 - len(
-                                f"\n\nMore details: {url}") - 3  # вычитаем длину URL и дополнительные символы
+                            max_summary_length = 1024 - len(f"\n\nMore details: {url}") - 3
                             summary = summary[:max_summary_length] + '...'
                             message = f"{summary}\n\nMore details: {url}"
 
@@ -90,7 +90,6 @@ async def send_articles(bot, channel_id):
     finally:
         if conn:
             conn.close()
-
 
 if __name__ == "__main__":
     bot_token = config.tg_bot_token
