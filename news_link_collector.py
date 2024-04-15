@@ -22,7 +22,11 @@ async def process_source(row, session, pool):
     try:
         html = await fetch(url, session)
         soup = BeautifulSoup(html, 'html.parser')
-        links = [urljoin(url, link['href']) for link in soup.find_all('a', href=True) if pattern in link['href']]
+        links = [
+            urljoin(url, link['href'])
+            for link in soup.find_all('a', href=True)
+            if pattern in link['href'] and 'tag' not in link['href']
+        ]
 
         if links:
             for link in links:
@@ -35,6 +39,7 @@ async def process_source(row, session, pool):
                 )
     except Exception as e:
         logger.error(f"Error processing {url}: {e}")
+
 
 
 async def main():
