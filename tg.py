@@ -46,7 +46,7 @@ async def send_articles(bot, channel_id):
         conn = psycopg2.connect(**db_params)
         with conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute("SELECT id, url FROM links WHERE status = 'send_error';")
+                cur.execute("SELECT id, url FROM links WHERE status = 'send_error' and status = 'ready';")
                 links = cur.fetchall()
 
                 for link in links:
