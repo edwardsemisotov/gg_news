@@ -1,110 +1,74 @@
-import requests
-from newspaper import Article
-from requests.exceptions import RequestException, SSLError
-from newspaper.article import ArticleException
-import psycopg2
-import psycopg2.extras
+import httpx
+import urllib.parse
+import asyncpg
 import config
 import logging
+import asyncio
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
-requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
-
-
-def process_article(cur, link_id, url):
+async def process_article(pool, link_id, url):
     try:
-        logger.info(f"Updating status to 'in progress' for link_id: {link_id}")
-        cur.execute("UPDATE links SET status = 'in progress' WHERE id = %s", (link_id,))
-        cur.connection.commit()
+        async with pool.acquire() as conn:
+            logger.info(f"Updating status to 'in progress' for link_id: {link_id}")
+            await conn.execute("UPDATE links SET status = 'in progress' WHERE id = $1", link_id)
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
-        article = Article(url, keep_article_html=True, browser_user_agent=headers['User-Agent'])
+            api_token = config.diffbot_api
+            encoded_url = urllib.parse.quote(url)
+            api_url = f"https://api.diffbot.com/v3/analyze?url={encoded_url}&token={api_token}"
 
-        try:
-            article.download()
-            article.parse()
-        except ArticleException as e:
-            logger.error(f"Failed to download or parse article {url}: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unknown error during downloading or parsing {url}: {e}")
-            raise
+            headers = {
+                "accept": "application/json"
+            }
+            response = await http_client.get(api_url, headers=headers)
+            data = response.json()
 
-        try:
-            article.nlp()
-        except ArticleException as e:
-            logger.error(f"Failed to perform NLP on article {url}: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unknown error during NLP processing {url}: {e}")
-            raise
+            article_title = data.get('objects', [{}])[0].get('title', '')
+            article_text = data.get('objects', [{}])[0].get('text', '')
 
-        cur.execute("""
-            INSERT INTO article_details (link_id, summary, content) VALUES (%s, %s, %s)
-            ON CONFLICT (link_id) DO NOTHING
-        """, (link_id, article.summary, article.text))
-        cur.connection.commit()
+            images = data.get('objects', [{}])[0].get('images', [])
+            image_urls = [image['url'] for image in images]
 
-        for image in article.images:
-            if not any(substring in image for substring in ['.png', 'data', 'yandex', 'telega-b']):
-                cur.execute("INSERT INTO image_links (link_id, image_url) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                            (link_id, image))
-                cur.connection.commit()
+            await conn.execute("""
+                INSERT INTO article_details (link_id, summary, content) VALUES ($1, $2, $3)
+                ON CONFLICT (link_id) DO NOTHING
+            """, link_id, article_title, article_text)
 
-        for video in article.movies:
-            cur.execute("INSERT INTO video_links (link_id, video_url) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                        (link_id, video))
-            cur.connection.commit()
+            for image_url in image_urls:
+                await conn.execute("INSERT INTO image_links (link_id, image_url) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                                   link_id, image_url)
 
-        cur.execute("UPDATE links SET status = 'ready' WHERE id = %s", (link_id,))
-        cur.connection.commit()
-    except (RequestException, SSLError, ArticleException) as e:
-        logger.error(f"Error processing article {url}: {e}")
-        cur.execute("UPDATE links SET status = 'error_article' WHERE id = %s", (link_id,))
-        cur.connection.commit()
+            await conn.execute("UPDATE links SET status = 'ready' WHERE id = $1", link_id)
     except Exception as e:
-        logger.error(f"Unexpected error while processing article {url}: {e}")
-        cur.execute("UPDATE links SET status = 'error_article' WHERE id = %s", (link_id,))
-        cur.connection.commit()
+        logger.error(f"Error processing article {url}: {e}")
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE links SET status = 'error_article' WHERE id = $1", link_id)
 
-
-def main():
-    conn = None
+async def main():
     try:
-        conn = psycopg2.connect(
-            dbname=config.core_dbname,
+        # Использование пула соединений
+        pool = await asyncpg.create_pool(
+            database=config.core_dbname,
             user=config.core_user,
             password=config.core_password,
             host=config.core_host,
             port=config.core_port
         )
-        cur = conn.cursor()
+        global http_client
+        http_client = httpx.AsyncClient()
 
-        cur.execute("SELECT id, url FROM links WHERE status='error_article' or status='pending'")
-        urls = cur.fetchall()
+        rows = await pool.fetch("SELECT id, url FROM links WHERE status='error_article' or status='pending'")
+        tasks = [process_article(pool, row['id'], row['url']) for row in rows if not "youtube.com" in row['url']]
+        await asyncio.gather(*tasks)
 
-        for link_id, url in urls:
-            if "youtube.com" in url:
-                cur.execute("UPDATE links SET status = 'ready' WHERE id = %s", (link_id,))
-                cur.connection.commit()
-                continue
-
-            process_article(cur, link_id, url)
-
-    except psycopg2.DatabaseError as e:
-        logger.error(f"Database error: {e}")
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
-        if conn:
-            cur.close()
-            conn.close()
-            logger.info("Database connection closed.")
-
+        if http_client:
+            await http_client.aclose()
+        await pool.close()
+        logger.info("Database connection and HTTP client closed.")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
