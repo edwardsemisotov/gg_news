@@ -4,9 +4,23 @@ import asyncpg
 import config
 import logging
 import asyncio
+from slugify import slugify
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
+
+async def generate_unique_slug(conn, base_slug):
+    iteration = 0
+    max_slug_length = 255
+    while True:
+        suffix = f"-{iteration}" if iteration > 0 else ""
+        # Обеспечиваем, что общая длина слага не превышает 255 символов
+        unique_slug = f"{base_slug[:max_slug_length-len(suffix)]}{suffix}"
+        # Проверяем, существует ли слаг в базе данных
+        exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM article_details WHERE slug = $1)", unique_slug)
+        if not exists:
+            return unique_slug
+        iteration += 1
 
 async def process_article(pool, link_id, url):
     try:
@@ -30,13 +44,16 @@ async def process_article(pool, link_id, url):
             images = data.get('objects', [{}])[0].get('images', [])
             image_urls = [image['url'] for image in images]
 
+            # Генерация слага из заголовка статьи и проверка уникальности
+            base_slug = slugify(article_title)
+            article_slug = await generate_unique_slug(conn, base_slug)
+
             await conn.execute("""
-                INSERT INTO article_details (link_id, summary, content) VALUES ($1, $2, $3)
-                ON CONFLICT (link_id) DO NOTHING
-            """, link_id, article_title, article_text)
+                INSERT INTO article_details (link_id, summary, content, slug) VALUES ($1, $2, $3, $4)
+            """, link_id, article_title, article_text, article_slug)
 
             for image_url in image_urls:
-                await conn.execute("INSERT INTO image_links (link_id, image_url) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                await conn.execute("INSERT INTO image_links (link_id, image_url) VALUES ($1, $2)",
                                    link_id, image_url)
 
             await conn.execute("UPDATE links SET status = 'ready' WHERE id = $1", link_id)
@@ -47,7 +64,6 @@ async def process_article(pool, link_id, url):
 
 async def main():
     try:
-        # Использование пула соединений
         pool = await asyncpg.create_pool(
             database=config.core_dbname,
             user=config.core_user,
@@ -65,7 +81,7 @@ async def main():
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
-        if http_client:
+        if 'http_client' in globals() and http_client:
             await http_client.aclose()
         await pool.close()
         logger.info("Database connection and HTTP client closed.")
