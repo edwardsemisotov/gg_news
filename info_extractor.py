@@ -68,8 +68,8 @@ async def main():
     try:
         pool = await asyncpg.create_pool(
             database=config.core_dbname,
-            user=config.core_user,
-            password=config.core_password,
+            user=config.info_extractor_db_user,
+            password=config.info_extractor_db_password,
             host=config.core_host,
             port=config.core_port
         )

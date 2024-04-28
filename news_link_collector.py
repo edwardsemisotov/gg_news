@@ -45,8 +45,8 @@ async def process_source(row, session, pool):
 async def main():
     conn_info = {
         'database': config.core_dbname,
-        'user': config.core_user,
-        'password': config.core_password,
+        'user': config.link_collector_db_user,
+        'password': config.link_collector_db_password,
         'host': config.core_host,
         'port': config.core_port
     }

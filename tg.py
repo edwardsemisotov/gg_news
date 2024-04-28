@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 db_params = {
     "dbname": config.core_dbname,
-    "user": config.core_user,
-    "password": config.core_password,
+    "user": config.tg_db_user,
+    "password": config.tg_db_password,
     "host": config.core_host,
     "port": config.core_port
 }
@@ -76,9 +76,9 @@ async def send_articles(bot, channel_id):
                         success = await send_with_retry(bot, channel_id, message, image_url)
 
                     if success:
-                        cur.execute("UPDATE links SET status = 'done' WHERE id = %s", (link_id,))
+                        cur.execute("UPDATE links SET tg = 'done' WHERE id = %s", (link_id,))
                     else:
-                        cur.execute("UPDATE links SET status = 'send_error' WHERE id = %s", (link_id,))
+                        cur.execute("UPDATE links SET tg = 'send_error' WHERE id = %s", (link_id,))
 
                     conn.commit()
                     await asyncio.sleep(10)

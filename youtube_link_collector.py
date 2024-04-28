@@ -42,8 +42,8 @@ def get_channel_videos(channel_id):
 try:
     conn = psycopg2.connect(
         dbname=config.core_dbname,
-        user=config.core_user,
-        password=config.core_password,
+        user=config.link_collector_db_user,
+        password=config.link_collector_db_password,
         host=config.core_host,
         port=config.core_port
     )
