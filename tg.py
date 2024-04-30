@@ -25,19 +25,19 @@ async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=
                 await bot.send_photo(chat_id=channel_id, photo=image_url, caption=message)
             else:
                 await bot.send_message(chat_id=channel_id, text=message)
-            return True
+            return True  # Возвращаем True при успешной отправке
         except telegram_error.TelegramError as e:
             if "Wrong file identifier/http url specified" in str(e):
                 logger.warning(f"Invalid image URL, sending message without image: {image_url}")
-                image_url = None
-                retry_count += 1
+                image_url = None  # Удаляем изображение из сообщения
+                continue  # Продолжаем попытки без изображения
             elif "Timed out" in str(e):
                 logger.warning(f"Timeout error, retrying {retry_count + 1}/{max_retries}")
                 retry_count += 1
                 await asyncio.sleep(10)
             else:
                 logger.error(f"Error sending message to Telegram: {e}")
-                return False
+                return False  # Возвращаем False, если ошибка не связана с изображением или таймаутом
     return False
 
 async def send_articles(bot, channel_id):
@@ -51,8 +51,6 @@ async def send_articles(bot, channel_id):
 
                 for link in links:
                     link_id, url = link['id'], link['url']
-                    success = False
-
                     cur.execute("""
                         SELECT ad.summary, il.image_url
                         FROM article_details ad
@@ -75,10 +73,10 @@ async def send_articles(bot, channel_id):
 
                         success = await send_with_retry(bot, channel_id, message, image_url)
 
-                    if success:
-                        cur.execute("UPDATE links SET tg = 'done' WHERE id = %s", (link_id,))
-                    else:
-                        cur.execute("UPDATE links SET tg = 'send_error' WHERE id = %s", (link_id,))
+                        if success:
+                            cur.execute("UPDATE links SET status = 'done' WHERE id = %s", (link_id,))
+                        else:
+                            cur.execute("UPDATE links SET status = 'send_error' WHERE id = %s", (link_id,))
 
                     conn.commit()
                     await asyncio.sleep(10)
