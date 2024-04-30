@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 db_params = {
     "dbname": config.core_dbname,
-    "user": config.tg_db_user,
-    "password": config.tg_db_password,
+    "user": config.core_user,
+    "password": config.core_password,
     "host": config.core_host,
     "port": config.core_port
 }
