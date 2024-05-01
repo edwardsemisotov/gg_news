@@ -36,6 +36,12 @@ async def process_article(pool, link_id, url):
                 "accept": "application/json"
             }
             response = await http_client.get(api_url, headers=headers)
+
+            if response.status_code == 429:
+                logger.error("API rate limit exceeded")
+                await conn.execute("UPDATE links SET status = 'rate_limit_exceeded' WHERE id = $1", link_id)
+                return
+
             data = response.json()
 
             article_title = data.get('objects', [{}])[0].get('title', '')
@@ -76,9 +82,11 @@ async def main():
         global http_client
         http_client = httpx.AsyncClient()
 
-        rows = await pool.fetch("SELECT id, url FROM links WHERE status='error_article' or status='pending'")
-        tasks = [process_article(pool, row['id'], row['url']) for row in rows if not "youtube.com" in row['url']]
-        await asyncio.gather(*tasks)
+        while True:
+            rows = await pool.fetch("SELECT id, url FROM links WHERE status='error_article' or status='pending'")
+            tasks = [process_article(pool, row['id'], row['url']) for row in rows if not "youtube.com" in row['url']]
+            await asyncio.gather(*tasks)
+            await asyncio.sleep(60)
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
@@ -87,6 +95,7 @@ async def main():
             await http_client.aclose()
         await pool.close()
         logger.info("Database connection and HTTP client closed.")
+
 
 
 if __name__ == "__main__":

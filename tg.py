@@ -1,21 +1,12 @@
 import asyncio
 import logging
 from telegram import Bot, error as telegram_error
-import psycopg2
-import psycopg2.extras
+import asyncpg
 from telegram.ext import Application
 import config
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-db_params = {
-    "dbname": config.core_dbname,
-    "user": config.core_user,
-    "password": config.core_password,
-    "host": config.core_host,
-    "port": config.core_port
-}
 
 async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=3):
     retry_count = 0
@@ -25,41 +16,56 @@ async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=
                 await bot.send_photo(chat_id=channel_id, photo=image_url, caption=message)
             else:
                 await bot.send_message(chat_id=channel_id, text=message)
-            return True  # Возвращаем True при успешной отправке
+            return True
         except telegram_error.TelegramError as e:
-            if "Wrong file identifier/http url specified" in str(e):
-                logger.warning(f"Invalid image URL, sending message without image: {image_url}")
-                image_url = None  # Удаляем изображение из сообщения
-                continue  # Продолжаем попытки без изображения
-            elif "Timed out" in str(e):
+            logger.error(f"Telegram API error: {e}")
+            error_message = str(e)
+            if "Wrong file identifier/http url specified" in error_message or \
+               "Wrong remote file identifier specified: wrong character in the string" in error_message:
+                logger.warning(f"Invalid image URL, trying to send message without image: {image_url}")
+                image_url = None
+                continue
+
+            elif "Timed out" in error_message:
                 logger.warning(f"Timeout error, retrying {retry_count + 1}/{max_retries}")
                 retry_count += 1
                 await asyncio.sleep(10)
             else:
-                logger.error(f"Error sending message to Telegram: {e}")
-                return False  # Возвращаем False, если ошибка не связана с изображением или таймаутом
+                return False
+        except Exception as general_error:
+            logger.error(f"Unexpected error occurred: {general_error}")
+            return False
     return False
 
+
 async def send_articles(bot, channel_id):
-    conn = None
     try:
-        conn = psycopg2.connect(**db_params)
-        with conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute("SELECT id, url FROM links WHERE status = 'send_error' or status = 'ready';")
-                links = cur.fetchall()
+        pool = await asyncpg.create_pool(
+            database=config.core_dbname,
+            user=config.core_user,
+            password=config.core_password,
+            host=config.core_host,
+            port=config.core_port
+        )
+
+        while True:
+            async with pool.acquire() as conn:
+                links = await conn.fetch("SELECT id, url FROM links WHERE status = 'send_error' or status = 'ready';")
+                if not links:
+                    logger.info("No tasks available. Waiting...")
+                    await asyncio.sleep(60)
+                    continue
 
                 for link in links:
                     link_id, url = link['id'], link['url']
-                    cur.execute("""
+                    article = await conn.fetchrow("""
                         SELECT ad.summary, il.image_url
                         FROM article_details ad
                         LEFT JOIN image_links il ON ad.link_id = il.link_id
-                        WHERE ad.link_id = %s
+                        WHERE ad.link_id = $1
                         ORDER BY il.id DESC
                         LIMIT 1;
-                    """, (link_id,))
-                    article = cur.fetchone()
+                    """, link_id)
 
                     if article:
                         summary = article['summary']
@@ -74,20 +80,17 @@ async def send_articles(bot, channel_id):
                         success = await send_with_retry(bot, channel_id, message, image_url)
 
                         if success:
-                            cur.execute("UPDATE links SET status = 'done' WHERE id = %s", (link_id,))
+                            await conn.execute("UPDATE links SET status = 'done' WHERE id = $1", link_id)
                         else:
-                            cur.execute("UPDATE links SET status = 'send_error' WHERE id = %s", (link_id,))
+                            await conn.execute("UPDATE links SET status = 'send_error' WHERE id = $1", link_id)
 
-                    conn.commit()
-                    await asyncio.sleep(10)
+                await asyncio.sleep(10)
 
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
-        if conn:
-            conn.rollback()
+        logger.error(f"An error occurred while processing articles: {e}")
     finally:
-        if conn:
-            conn.close()
+        if pool:
+            await pool.close()
 
 if __name__ == "__main__":
     bot_token = config.tg_bot_token

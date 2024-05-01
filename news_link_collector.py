@@ -41,7 +41,6 @@ async def process_source(row, session, pool):
         logger.error(f"Error processing {url}: {e}")
 
 
-
 async def main():
     conn_info = {
         'database': config.core_dbname,
@@ -54,14 +53,17 @@ async def main():
     pool = await asyncpg.create_pool(**conn_info)
     logger.info("Successfully created database pool.")
 
-    async with aiohttp.ClientSession() as session, pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT s.name, s.url, p.pattern FROM BelarusCatholicDigest.sources s JOIN BelarusCatholicDigest.patterns p ON s.id = p.source_id WHERE s.url NOT LIKE '%youtube.com%';"
-        )
-        tasks = [process_source(row, session, pool) for row in rows]
-        await asyncio.gather(*tasks)
+    async with aiohttp.ClientSession() as session:
+        while True:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT s.name, s.url, p.pattern FROM BelarusCatholicDigest.sources s JOIN BelarusCatholicDigest.patterns p ON s.id = p.source_id WHERE s.url NOT LIKE '%youtube.com%';"
+                )
+                tasks = [process_source(row, session, pool) for row in rows]
+                await asyncio.gather(*tasks)
 
-    logger.info("Completed processing.")
+            logger.info("Completed processing one cycle. Waiting for 60 seconds before the next cycle.")
+            await asyncio.sleep(60)
 
 
 if __name__ == '__main__':
