@@ -34,7 +34,7 @@ async def process_source(row, session, pool):
 
             async with pool.acquire() as conn:
                 await conn.executemany(
-                    "INSERT INTO BelarusCatholicDigest.links (source_id, url, status) VALUES ((SELECT id FROM sources WHERE url = $1), $2, 'pending') ON CONFLICT (url) DO NOTHING;",
+                    "INSERT INTO news.links (source_id, url, status) VALUES ((SELECT id FROM news.sources WHERE url = $1), $2, 'pending') ON CONFLICT (url) DO NOTHING;",
                     [(url, link) for link in links]
                 )
     except Exception as e:
@@ -57,7 +57,7 @@ async def main():
         while True:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT s.name, s.url, p.pattern FROM BelarusCatholicDigest.sources s JOIN BelarusCatholicDigest.patterns p ON s.id = p.source_id WHERE s.url NOT LIKE '%youtube.com%';"
+                    "SELECT s.name, s.url, p.pattern FROM news.sources s JOIN news.patterns p ON s.id = p.source_id WHERE s.url NOT LIKE '%youtube.com%';"
                 )
                 tasks = [process_source(row, session, pool) for row in rows]
                 await asyncio.gather(*tasks)
