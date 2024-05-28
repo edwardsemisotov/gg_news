@@ -47,7 +47,7 @@ async def generate_review_with_gpt(text, retry_count=3):
                 else:
                     logger.error(f"Failed to generate review with GPT: {response.text}")
                     if response.status_code == 500:
-                        continue  # Retry on server error
+                        continue
                     return None
             except httpx.ReadTimeout:
                 logger.error("Read timeout occurred while generating review for text")
@@ -78,7 +78,11 @@ async def translate_with_gpt(text, target_language='ru'):
             logger.error(f"Failed to translate text with GPT: {response.text}")
             return None
 
+
 async def process_article(pool, link_id, url):
+    max_retries = 3  # Максимальное количество попыток
+    retry_delay = 2  # Задержка перед повтором запроса в секундах
+
     try:
         async with pool.acquire() as conn:
             logger.info(f"Updating status to 'in progress' for link_id: {link_id}")
@@ -90,21 +94,30 @@ async def process_article(pool, link_id, url):
             headers = {"accept": "application/json"}
             timeout_config = httpx.Timeout(10.0, read=30.0)
 
-            await request_semaphore.acquire()
-            try:
-                response = await http_client.get(api_url, headers=headers, timeout=timeout_config)
-            finally:
-                request_semaphore.release()
-                await asyncio.sleep(0.8)  # Enforce rate limit
+            response = None
+            for attempt in range(max_retries):
+                try:
+                    async with request_semaphore:
+                        response = await http_client.get(api_url, headers=headers, timeout=timeout_config)
+                        await asyncio.sleep(2)
+                    if response.status_code == 200:
+                        break
+                except httpx.RequestError as e:
+                    logger.error(f"Network request failed: {e}, attempt {attempt + 1} of {max_retries}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                    else:
+                        logger.error("All retries failed, setting status to 'error_connection'")
+                        await conn.execute("UPDATE news.links SET status = 'error_connection' WHERE id = $1", link_id)
+                        return
+                except Exception as e:
+                    logger.error(f"Unexpected error during request: {e}")
+                    await conn.execute("UPDATE news.links SET status = 'error_article' WHERE id = $1", link_id)
+                    return
 
-            if response.status_code == 429:
-                retry_after = int(response.headers.get('Retry-After', 5))
-                logger.error(f"Превышен лимит запросов. Повтор после {retry_after} секунд.")
-                await asyncio.sleep(retry_after)
-                return await process_article(pool, link_id, url)
-
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch article with status {response.status_code}: {response.text}")
+            if response is None or response.status_code != 200:
+                logger.error(
+                    f"API request failed with status {response.status_code if response else 'No Response'}: {response.text if response else 'No response received'}")
                 await conn.execute("UPDATE news.links SET status = 'fetch_error' WHERE id = $1", link_id)
                 return
 
@@ -125,6 +138,11 @@ async def process_article(pool, link_id, url):
             article_title = objects[0].get('title', '')
             article_text = objects[0].get('text', '')
             article_lang = objects[0].get('lang', 'pl')
+
+            if not article_text:
+                logger.info("No content found for article, setting status to 'no_objects'")
+                await conn.execute("UPDATE news.links SET status = 'no_objects content' WHERE id = $1", link_id)
+                return
 
             review = await generate_review_with_gpt(article_text)
             if review is None:
