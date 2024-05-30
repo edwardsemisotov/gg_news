@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger()
 
 request_semaphore = asyncio.Semaphore(1)
-
+article_processing_semaphore = asyncio.Semaphore(10)
 
 async def generate_unique_slug(conn, base_slug):
     iteration = 0
@@ -23,7 +23,6 @@ async def generate_unique_slug(conn, base_slug):
             return unique_slug
         iteration += 1
 
-
 async def generate_review_with_gpt(text, retry_count=3):
     api_url = "https://api.openai.com/v1/chat/completions"
     headers = {
@@ -33,8 +32,7 @@ async def generate_review_with_gpt(text, retry_count=3):
     payload = {
         "model": "gpt-4o",
         "messages": [
-            {"role": "system",
-             "content": "You are a journalist. Provide a concise review of the following article text. Return only plain text without any additional fields or annotations."},
+            {"role": "system", "content": "You are a journalist. Provide a concise review of the following article text. Return only plain text without any additional fields or annotations."},
             {"role": "user", "content": text}
         ]
     }
@@ -52,15 +50,13 @@ async def generate_review_with_gpt(text, retry_count=3):
                         continue
                     return None
             except httpx.ReadTimeout:
-                logger.error(
-                    f"Read timeout occurred while generating review for text, attempt {attempt + 1} of {retry_count}")
+                logger.error(f"Read timeout occurred while generating review for text, attempt {attempt + 1} of {retry_count}")
                 if attempt < retry_count - 1:
                     await asyncio.sleep(5 * (attempt + 1))
                     continue
                 return None
     logger.error(f"All retries failed for text: {text}")
     return None
-
 
 async def translate_with_gpt(text, target_language='ru', retry_count=3):
     api_url = "https://api.openai.com/v1/chat/completions"
@@ -96,7 +92,9 @@ async def translate_with_gpt(text, target_language='ru', retry_count=3):
     logger.error("All retries failed for translation.")
     return None
 
-
+async def guarded_process_article(pool, link_id, url):
+    async with article_processing_semaphore:
+        await process_article(pool, link_id, url)
 
 async def process_article(pool, link_id, url):
     max_retries = 3
@@ -111,7 +109,7 @@ async def process_article(pool, link_id, url):
             encoded_url = urllib.parse.quote(url)
             api_url = f"https://api.diffbot.com/v3/analyze?url={encoded_url}&token={api_token}"
             headers = {"accept": "application/json"}
-            timeout_config = httpx.Timeout(10.0, read=60.0)  # Увеличено время ожидания до 60 секунд
+            timeout_config = httpx.Timeout(10.0, read=60.0)
 
             response = None
             for attempt in range(max_retries):
@@ -135,8 +133,7 @@ async def process_article(pool, link_id, url):
                     return
 
             if response is None or response.status_code != 200:
-                logger.error(
-                    f"API request failed with status {response.status_code if response else 'No Response'}: {response.text if response else 'No response received'}")
+                logger.error(f"API request failed with status {response.status_code if response else 'No Response'}: {response.text if response else 'No response received'}")
                 await conn.execute("UPDATE news.links SET status = 'fetch_error' WHERE id = $1", link_id)
                 return
 
@@ -211,7 +208,6 @@ async def process_article(pool, link_id, url):
         async with pool.acquire() as conn:
             await conn.execute("UPDATE news.links SET status = 'error_article' WHERE id = $1", link_id)
 
-
 async def main():
     try:
         pool = await asyncpg.create_pool(
@@ -226,7 +222,7 @@ async def main():
 
         while True:
             rows = await pool.fetch("SELECT id, url FROM news.links WHERE status='error_article' or status='pending'")
-            tasks = [process_article(pool, row['id'], row['url']) for row in rows if not "youtube.com" in row['url']]
+            tasks = [guarded_process_article(pool, row['id'], row['url']) for row in rows if not "youtube.com" in row['url']]
             await asyncio.gather(*tasks)
             await asyncio.sleep(60)
 
@@ -237,7 +233,6 @@ async def main():
             await http_client.aclose()
         await pool.close()
         logger.info("Database connection and HTTP client closed.")
-
 
 if __name__ == "__main__":
     asyncio.run(main())
