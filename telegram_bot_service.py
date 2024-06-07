@@ -8,6 +8,7 @@ import config
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=3):
     retry_count = 0
     while retry_count < max_retries:
@@ -40,6 +41,7 @@ async def send_with_retry(bot, channel_id, message, image_url=None, max_retries=
     logger.error(f"Failed to send message after {max_retries} retries")
     return False
 
+
 async def send_articles(bot, channel_id):
     try:
         logger.info("Creating database connection pool")
@@ -55,7 +57,7 @@ async def send_articles(bot, channel_id):
         while True:
             async with pool.acquire() as conn:
                 logger.info("Fetching links with status 'send_error' or 'ready'")
-                links = await conn.fetch("SELECT id FROM news.links WHERE status = 'send_error' or status = 'ready';")
+                links = await conn.fetch("SELECT id FROM news.links WHERE tg = 'send_error' or tg = 'ready';")
                 if not links:
                     logger.info("No tasks available. Waiting...")
                     await asyncio.sleep(60)
@@ -75,14 +77,18 @@ async def send_articles(bot, channel_id):
                     if articles:
                         summary = articles[0]['summary']
                         image_url = articles[0]['image_url']
-                        logger.info(f"Fetched article details for link ID {link_id}: Summary length - {len(summary)}, Image URL - {image_url}")
+                        logger.info(
+                            f"Fetched article details for link ID {link_id}: Summary length - {len(summary)}, Image URL - {image_url}")
 
                         message = f"📰 *{summary}*\n\n"
+                        urls_added = set()
                         for article in articles:
                             lang = article['lang']
                             slug = article['slug']
                             custom_url = f"https://warszaw.infocore.news/{lang}/{slug}"
-                            message += f"[Read more ({lang.upper()})]({custom_url})\n"
+                            if custom_url not in urls_added:
+                                message += f"[Read more ({lang.upper()})]({custom_url})\n"
+                                urls_added.add(custom_url)
                         logger.info(f"Constructed message for link ID {link_id}")
 
                         if len(message) > 1024:
@@ -94,7 +100,7 @@ async def send_articles(bot, channel_id):
                         success = await send_with_retry(bot, channel_id, message, image_url)
 
                         new_status = 'done' if success else 'send_error'
-                        await conn.execute("UPDATE news.links SET status = $2 WHERE id = $1", link_id, new_status)
+                        await conn.execute("UPDATE news.links SET tg = $2 WHERE id = $1", link_id, new_status)
                         logger.info(f"Updated status for link ID {link_id} to {new_status}")
                     else:
                         logger.warning(f"No articles found for link ID {link_id}")
@@ -107,6 +113,7 @@ async def send_articles(bot, channel_id):
         if pool:
             await pool.close()
             logger.info("Database connection pool closed")
+
 
 if __name__ == "__main__":
     bot_token = config.tg_bot_token
